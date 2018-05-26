@@ -1,3 +1,25 @@
+/**
+ * rt_timer.c
+ *
+ * Created by Dimitrios Karageorgiou,
+ *  for course "Embedded And Realtime Systems".
+ *  Electrical and Computers Engineering Department, AuTh, GR - 2017-2018
+ *
+ * A simple implementation of a real time timer that avoids shifting.
+ *
+ * This demo at each timeout of the timer logs the returned value of
+ * gettimeofday() into a file named 'timestamps_<timestamp>'
+ *
+ * Usage:
+ *  ./executable <N> <Toverall>
+ * where:
+ *  -N : Number of samples to get.
+ *  -Toverall : Overall time during which N samples will be taken. Time distance
+ *          between each sample is going to be Toverall/N.
+ *
+ * version: 0.1
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -13,7 +35,7 @@ void create_logger();
 void destroy_logger();
 
 
-FILE *log_file;
+FILE *log_file;  // File for logging of timestamps.
 
 
 int main(int argc, char *argv[])
@@ -23,7 +45,7 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    long samples = atol(argv[1]);    // Number of samples requested.
+    long samples = atol(argv[1]);       // Number of samples requested.
     int sampling_time = atoi(argv[2]);  // Sampling frame in seconds.
 
     long total_time = sampling_time * 1000;  // Sampling frame in ms.
@@ -35,36 +57,33 @@ int main(int argc, char *argv[])
     period_spec.tv_sec = period / 1000;  // ms -> sec
     period_spec.tv_nsec = (period % 1000) * 1000000;  // ms -> nsec
 
-    // printf("period: %ld secs %ld nsecs\n", (long) period_spec.tv_sec, period_spec.tv_nsec);
-
     create_logger();
 
-    struct timespec target;
+    struct timespec target;     // Target time for next timeout.
+    struct timespec cur_time;   // Current time.
+    struct timespec diff;       // Difference between current time and target.
+
+    // Set first target to current time plus a period.
     clock_gettime(CLOCK_MONOTONIC, &target);
-    // printf("init_time: %ld secs %ld nsecs\n", (long) target.tv_sec, target.tv_nsec);
     timespec_add(&target, &target, &period_spec);
 
-    struct timespec cur_time;
-    struct timespec diff;
-    // struct timespec sleep_time;
-
     for (long i = 0; i < samples; i++) {
-        // printf("target: %ld secs %ld nsecs\n", (long) target.tv_sec, target.tv_nsec);
+        // Calculate the difference between current time and target.
         clock_gettime(CLOCK_MONOTONIC, &cur_time);
-        // printf("cur_time: %ld secs %ld nsecs\n", (long) cur_time.tv_sec, cur_time.tv_nsec);
         timespec_subtract(&diff, &target, &cur_time);
 
-        // printf("diff: %ld secs %ld nsecs\n", (long) diff.tv_sec, diff.tv_nsec);
         if (diff.tv_sec < 0 || diff.tv_nsec < 0) printf("In past.\n");
 
+        // Sleep for calculated diff time.
         int rc = nanosleep(&diff, NULL);
         if (rc != 0) {
             perror("Nanosleep not completed properly.\n");
         }
 
-        // Do work here
+        // Do work here.
         log_time();
 
+        // Set next target. Everything is integral, so no error accumulation.
         timespec_add(&target, &target, &period_spec);
     }
 
@@ -73,6 +92,16 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+/**
+ * Adds two timespec structs.
+ *
+ * Operation: res = a + b
+ *
+ * Parameters:
+ *  -a : First operand.
+ *  -b : Second operand.
+ *  -res : Target in which the result will be written.
+ */
 void timespec_add(struct timespec *res, struct timespec *a, struct timespec *b)
 {
     res->tv_nsec = a->tv_nsec + b->tv_nsec;
@@ -83,6 +112,16 @@ void timespec_add(struct timespec *res, struct timespec *a, struct timespec *b)
     }
 }
 
+/**
+ * Subtracts two timespec structs.
+ *
+ * Operation: res = a - b
+ *
+ * Parameters:
+ *  -a : First operand.
+ *  -b : Second operand.
+ *  -res : Target in which the result will be written.
+ */
 void timespec_subtract(struct timespec *res, struct timespec *a, struct timespec *b)
 {
     if (a->tv_nsec < b->tv_nsec) {
@@ -95,6 +134,9 @@ void timespec_subtract(struct timespec *res, struct timespec *a, struct timespec
     }
 }
 
+/**
+ * Initializes global log_file file stream.
+ */
 void create_logger()
 {
     struct timeval cur_time;
@@ -109,26 +151,27 @@ void create_logger()
     }
 }
 
+/**
+ * Destroys global log_file file stream.
+ */
 void destroy_logger()
 {
     fclose(log_file);
 }
 
+/**
+ * Logs the value of gettimeofday() into global log_file file stream.
+ */
 void log_time()
 {
     struct timeval cur_time;
     gettimeofday(&cur_time, NULL);
 
-    // fprintf(log_file, "%ld secs %ld usecs\n", (long) cur_time.tv_sec, cur_time.tv_usec);
-
+    // Make sure that 64-bit ints are used.
     int64_t secs = (int64_t) cur_time.tv_sec;
     int64_t usecs = (int64_t) cur_time.tv_usec;
+
     fwrite(&secs, sizeof(int64_t), 1, log_file);
     fwrite(&usecs, sizeof(int64_t), 1, log_file);
-
-    // struct timespec cur_time_s;
-    // clock_gettime(CLOCK_MONOTONIC, &cur_time_s);
-    // fprintf(log_file, "mono: %ld secs %ld nsecs\n", (long) cur_time_s.tv_sec, cur_time_s.tv_nsec);
-
     fflush(log_file);
 }
